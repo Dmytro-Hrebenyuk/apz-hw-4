@@ -1,0 +1,142 @@
+version: "3.8"
+
+services:
+
+  config-server:
+    build: ./config-server
+    ports:
+      - "8085:8085"
+    networks:
+      - app-network
+
+  hazelcast-1:
+    image: hazelcast/hazelcast:5.3
+    environment:
+      - HZ_CLUSTERNAME=dev
+      - JAVA_OPTS=-Dhazelcast.local.publicAddress=hazelcast-1:5701
+    ports:
+      - "5701:5701"
+    networks:
+      - app-network
+
+  hazelcast-2:
+    image: hazelcast/hazelcast:5.3
+    environment:
+      - HZ_CLUSTERNAME=dev
+      - JAVA_OPTS=-Dhazelcast.local.publicAddress=hazelcast-2:5701
+    ports:
+      - "5702:5701"
+    networks:
+      - app-network
+
+  hazelcast-3:
+    image: hazelcast/hazelcast:5.3
+    environment:
+      - HZ_CLUSTERNAME=dev
+      - JAVA_OPTS=-Dhazelcast.local.publicAddress=hazelcast-3:5701
+    ports:
+      - "5703:5701"
+    networks:
+      - app-network
+
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: counterdb
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - app-network
+
+  logging-service-1:
+    build: ./logging-service
+    environment:
+      - HZ_HOST=hazelcast-1
+      - SERVICE_NAME=logging-service-1
+      - SERVICE_URL=http://logging-service-1:8081
+      - CONFIG_URL=http://config-server:8085
+    ports:
+      - "8081:8081"
+    depends_on:
+      - hazelcast-1
+      - config-server
+    networks:
+      - app-network
+
+  logging-service-2:
+    build: ./logging-service
+    environment:
+      - HZ_HOST=hazelcast-2
+      - SERVICE_NAME=logging-service-2
+      - SERVICE_URL=http://logging-service-2:8081
+      - CONFIG_URL=http://config-server:8085
+    ports:
+      - "8083:8081"
+    depends_on:
+      - hazelcast-2
+      - config-server
+    networks:
+      - app-network
+
+  logging-service-3:
+    build: ./logging-service
+    environment:
+      - HZ_HOST=hazelcast-3
+      - SERVICE_NAME=logging-service-3
+      - SERVICE_URL=http://logging-service-3:8081
+      - CONFIG_URL=http://config-server:8085
+    ports:
+      - "8084:8081"
+    depends_on:
+      - hazelcast-3
+      - config-server
+    networks:
+      - app-network
+
+  counter-service:
+    build: ./counter-service
+    environment:
+      - HZ_HOST=hazelcast-1
+      - SERVICE_NAME=counter-service
+      - SERVICE_URL=http://counter-service:8082
+      - CONFIG_URL=http://config-server:8085
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=counterdb
+      - DB_USER=user
+      - DB_PASS=password
+    ports:
+      - "8082:8082"
+    depends_on:
+      - postgres
+      - hazelcast-1
+      - config-server
+    networks:
+      - app-network
+
+  facade-service:
+    build: ./facade-service
+    environment:
+      - CONFIG_URL=http://config-server:8085
+      - SERVICE_URL=http://facade-service:8080
+    ports:
+      - "8080:8080"
+    depends_on:
+      - config-server
+      - logging-service-1
+      - logging-service-2
+      - logging-service-3
+      - counter-service
+    networks:
+      - app-network
+
+volumes:
+  pgdata:
+
+networks:
+  app-network:
+    driver: bridge
