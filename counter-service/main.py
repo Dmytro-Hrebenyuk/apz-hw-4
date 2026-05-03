@@ -22,10 +22,7 @@ DB_PASS = os.getenv("DB_PASS", "password")
 
 QUEUE_NAME = "counter-queue"
 
-hz_client = None
-tx_queue = None
 db_conn = None
-
 
 
 def get_conn():
@@ -66,24 +63,20 @@ def init_db():
     raise RuntimeError("Cannot connect to PostgreSQL")
 
 
-
-def get_queue():
-    global hz_client, tx_queue
-    if tx_queue is None:
-        for i in range(10):
-            try:
-                hz_client = hazelcast.HazelcastClient(
-                    cluster_members=[f"{HZ_HOST}:5701"],
-                    cluster_name="dev",
-                )
-                tx_queue = hz_client.get_queue(QUEUE_NAME).blocking()
-                print(f"[COUNTER] Connected to Hazelcast Queue '{QUEUE_NAME}'")
-                return tx_queue
-            except Exception as e:
-                print(f"[COUNTER] HZ not ready ({i+1}/10): {e}")
-                time.sleep(3)
-    return tx_queue
-
+def get_hz_queue():
+    for i in range(10):
+        try:
+            client = hazelcast.HazelcastClient(
+                cluster_members=[f"{HZ_HOST}:5701"],
+                cluster_name="dev",
+            )
+            q = client.get_queue(QUEUE_NAME).blocking()
+            print(f"[COUNTER] Connected to Hazelcast Queue '{QUEUE_NAME}'")
+            return q
+        except Exception as e:
+            print(f"[COUNTER] HZ not ready ({i+1}/10): {e}")
+            time.sleep(3)
+    raise RuntimeError("Cannot connect to Hazelcast")
 
 
 def process_message(msg: dict):
@@ -107,7 +100,7 @@ def process_message(msg: dict):
 
 
 def queue_consumer():
-    queue = get_queue()
+    queue = get_hz_queue()
     print("[COUNTER] Queue consumer started, waiting for messages...")
     while True:
         try:
@@ -120,11 +113,9 @@ def queue_consumer():
             time.sleep(1)
 
 
-
 @app.on_event("startup")
 async def startup():
     init_db()
-    get_queue()
 
     t = threading.Thread(target=queue_consumer, daemon=True)
     t.start()
@@ -143,16 +134,6 @@ async def startup():
         except Exception as e:
             print(f"[COUNTER] Config-server not ready ({attempt+1}/10): {e}")
             await asyncio.sleep(2)
-
-
-
-@app.post("/enqueue")
-def enqueue(msg: dict):
-    """Facade calls this — puts message into Hazelcast Queue (async)"""
-    queue = get_queue()
-    queue.put(msg)
-    print(f"[COUNTER] Enqueued: {msg}")
-    return {"status": "queued"}
 
 
 @app.get("/balance/{user_id}")
